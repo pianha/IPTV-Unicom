@@ -1,0 +1,117 @@
+name: Update IPTV-Unicom
+
+on:
+  schedule:
+    # 每天北京时间 07:00
+    # GitHub Actions 使用 UTC，北京时间 = UTC+8
+    - cron: "0 23 * * *"
+
+  # 允许手动运行
+  workflow_dispatch:
+
+# 允许 GitHub Actions 写入仓库
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download and validate IPTV file
+        shell: bash
+        run: |
+          set +e
+
+          URL="https://raw.githubusercontent.com/qwerttvv/Beijing-IPTV/master/IPTV-Unicom.m3u"
+          FILE="IPTV-Unicom.m3u"
+          TEMP="IPTV-Unicom.m3u.tmp"
+
+          echo "Downloading IPTV file..."
+
+          # 下载到临时文件，避免下载失败破坏现有文件
+          curl -fL --connect-timeout 20 --max-time 120 "$URL" -o "$TEMP"
+
+          if [ $? -ne 0 ]; then
+            echo "Download failed. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 文件不能为空
+          if [ ! -s "$TEMP" ]; then
+            echo "Downloaded file is empty. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 必须包含 M3U 标识
+          if ! head -n 5 "$TEMP" | grep -q "#EXTM3U"; then
+            echo "Downloaded file does not appear to be a valid M3U file. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 必须存在需要替换的原始地址
+          if ! grep -q "192\.168\.123\.1:23234" "$TEMP"; then
+            echo "Target address was not found. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 执行替换
+          sed -i 's/192\.168\.123\.1:23234/192.168.7.1:8888/g' "$TEMP"
+
+          # 确认旧地址已经不存在
+          if grep -q "192\.168\.123\.1:23234" "$TEMP"; then
+            echo "Replacement failed. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 确认新地址存在
+          if ! grep -q "192\.168\.7\.1:8888" "$TEMP"; then
+            echo "Replacement result is invalid. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 所有检查通过后才正式覆盖
+          mv "$TEMP" "$FILE"
+
+          echo "IPTV file updated successfully."
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          set +e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add IPTV-Unicom.m3u
+
+          # 没有变化就直接结束
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+            exit 0
+          fi
+
+          git commit -m "Update IPTV-Unicom.m3u"
+
+          if [ $? -ne 0 ]; then
+            echo "Commit failed. Ignoring error."
+            exit 0
+          fi
+
+          git push
+
+          if [ $? -ne 0 ]; then
+            echo "Push failed. Ignoring error."
+            exit 0
+          fi
+
+          echo "Update completed successfully."
