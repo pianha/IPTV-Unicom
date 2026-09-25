@@ -1,4 +1,3 @@
-```yaml
 name: Update IPTV-Unicom-Multicast
 
 on:
@@ -166,4 +165,3 @@ jobs:
           fi
 
           echo "Update completed successfully."
-```
