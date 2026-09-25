@@ -3,13 +3,10 @@ name: Update IPTV-Unicom
 on:
   schedule:
     # 每天北京时间 07:00
-    # GitHub Actions 使用 UTC，北京时间 = UTC+8
     - cron: "0 23 * * *"
 
-  # 允许手动运行
   workflow_dispatch:
 
-# 允许 GitHub Actions 写入仓库
 permissions:
   contents: write
 
@@ -30,7 +27,7 @@ jobs:
           FILE="IPTV-Unicom.m3u"
           TEMP="IPTV-Unicom.m3u.tmp"
 
-          echo "Downloading IPTV file..."
+          echo "Downloading IPTV-Unicom.m3u..."
 
           # 下载到临时文件，避免下载失败破坏现有文件
           curl -fL --connect-timeout 20 --max-time 120 "$URL" -o "$TEMP"
@@ -62,27 +59,102 @@ jobs:
             exit 0
           fi
 
-          # 执行替换
+          # 替换 IPTV 地址
           sed -i 's/192\.168\.123\.1:23234/192.168.7.1:8888/g' "$TEMP"
 
-          # 确认旧地址已经不存在
+          # 修改 tvg-name
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          file = Path("IPTV-Unicom.m3u.tmp")
+
+          text = file.read_text(encoding="utf-8")
+
+          lines = text.splitlines(keepends=True)
+          result = []
+
+          changed = 0
+
+          for line in lines:
+              # 只处理当前这一行：
+              # #EXTINF:... tvg-name="该频道节目单尚无",频道名称
+              #
+              # 不读取下一行，因此不会受到下面 URL 行的影响。
+              pattern = r'^(#EXTINF:[^\r\n]*?)tvg-name="该频道节目单尚无"(,[^\r\n]*)$'
+
+              match = re.match(pattern, line.rstrip("\r\n"))
+
+              if match:
+                  prefix = match.group(1)
+                  channel_part = match.group(2)
+
+                  # 取逗号后面的频道名称
+                  channel_name = channel_part[1:]
+
+                  # 保留原来的行尾
+                  newline = ""
+                  if line.endswith("\r\n"):
+                      newline = "\r\n"
+                  elif line.endswith("\n"):
+                      newline = "\n"
+                  elif line.endswith("\r"):
+                      newline = "\r"
+
+                  new_line = (
+                      prefix
+                      + 'tvg-name="'
+                      + channel_name
+                      + '"'
+                      + channel_part
+                      + newline
+                  )
+
+                  result.append(new_line)
+                  changed += 1
+              else:
+                  result.append(line)
+
+          file.write_text("".join(result), encoding="utf-8")
+
+          print(f"Updated tvg-name entries: {changed}")
+          PY
+
+          # 确认修改后的文件仍然存在且非空
+          if [ ! -s "$TEMP" ]; then
+            echo "Modified file is empty. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 确认旧 IPTV 地址已经不存在
           if grep -q "192\.168\.123\.1:23234" "$TEMP"; then
             echo "Replacement failed. Skipping update."
             rm -f "$TEMP"
             exit 0
           fi
 
-          # 确认新地址存在
+          # 确认新 IPTV 地址存在
           if ! grep -q "192\.168\.7\.1:8888" "$TEMP"; then
             echo "Replacement result is invalid. Skipping update."
             rm -f "$TEMP"
             exit 0
           fi
 
-          # 所有检查通过后才正式覆盖
+          # 检查是否还存在异常 tvg-name
+          remaining=$(grep -c 'tvg-name="该频道节目单尚无"' "$TEMP" || true)
+
+          if [ "$remaining" -gt 0 ]; then
+            echo "Some invalid tvg-name entries remain: $remaining"
+            echo "Skipping update to protect the existing file."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 所有检查通过后正式覆盖
           mv "$TEMP" "$FILE"
 
-          echo "IPTV file updated successfully."
+          echo "IPTV-Unicom.m3u updated successfully."
 
       - name: Commit changes
         shell: bash
@@ -94,7 +166,7 @@ jobs:
 
           git add IPTV-Unicom.m3u
 
-          # 没有变化就直接结束
+          # 没有变化就不提交
           if git diff --cached --quiet; then
             echo "No changes detected."
             exit 0
