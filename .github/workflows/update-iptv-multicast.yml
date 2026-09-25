@@ -1,3 +1,4 @@
+```yaml
 name: Update IPTV-Unicom-Multicast
 
 on:
@@ -54,7 +55,82 @@ jobs:
             exit 0
           fi
 
-          # 检查通过后正式覆盖
+          # 修改 tvg-name
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          file = Path("IPTV-Unicom-Multicast.m3u.tmp")
+
+          text = file.read_text(encoding="utf-8")
+
+          lines = text.splitlines(keepends=True)
+          result = []
+
+          changed = 0
+
+          for line in lines:
+              # 只处理当前这一行：
+              # #EXTINF:... tvg-name="该频道节目单尚无",频道名称
+              #
+              # 不读取下一行，因此不会受到下面 URL 行的影响。
+              pattern = r'^(#EXTINF:[^\r\n]*?)tvg-name="该频道节目单尚无"(,[^\r\n]*)$'
+
+              match = re.match(pattern, line.rstrip("\r\n"))
+
+              if match:
+                  prefix = match.group(1)
+                  channel_part = match.group(2)
+
+                  # 取逗号后面的频道名称
+                  channel_name = channel_part[1:]
+
+                  # 保留原来的行尾
+                  newline = ""
+                  if line.endswith("\r\n"):
+                      newline = "\r\n"
+                  elif line.endswith("\n"):
+                      newline = "\n"
+                  elif line.endswith("\r"):
+                      newline = "\r"
+
+                  new_line = (
+                      prefix
+                      + 'tvg-name="'
+                      + channel_name
+                      + '"'
+                      + channel_part
+                      + newline
+                  )
+
+                  result.append(new_line)
+                  changed += 1
+              else:
+                  result.append(line)
+
+          file.write_text("".join(result), encoding="utf-8")
+
+          print(f"Updated tvg-name entries: {changed}")
+          PY
+
+          # 确认修改后的文件仍然存在且非空
+          if [ ! -s "$TEMP" ]; then
+            echo "Modified file is empty. Skipping update."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 检查是否还存在需要处理的异常 tvg-name
+          remaining=$(grep -c 'tvg-name="该频道节目单尚无"' "$TEMP" || true)
+
+          if [ "$remaining" -gt 0 ]; then
+            echo "Some invalid tvg-name entries remain: $remaining"
+            echo "Skipping update to protect the existing file."
+            rm -f "$TEMP"
+            exit 0
+          fi
+
+          # 所有检查通过后正式覆盖
           mv "$TEMP" "$FILE"
 
           echo "IPTV-Unicom-Multicast.m3u updated successfully."
@@ -90,3 +166,4 @@ jobs:
           fi
 
           echo "Update completed successfully."
+```
