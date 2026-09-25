@@ -5,8 +5,6 @@ on:
     # 每天北京时间 07:00
     # GitHub Actions 使用 UTC，北京时间 = UTC+8
     - cron: "0 23 * * *"
-
-  # 允许手动运行
   workflow_dispatch:
 
 permissions:
@@ -20,148 +18,63 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Download and validate IPTV file
+      - name: Download and process IPTV-Unicom-Multicast.m3u
         shell: bash
         run: |
-          set +e
+          set -e
 
           URL="https://raw.githubusercontent.com/qwerttvv/Beijing-IPTV/master/IPTV-Unicom-Multicast.m3u"
           FILE="IPTV-Unicom-Multicast.m3u"
           TEMP="IPTV-Unicom-Multicast.m3u.tmp"
 
-          echo "Downloading IPTV-Unicom-Multicast.m3u..."
+          echo "Downloading..."
 
-          # 下载到临时文件，避免下载失败破坏现有文件
-          curl -fL --connect-timeout 20 --max-time 120 "$URL" -o "$TEMP"
+          curl -fL \
+            --connect-timeout 20 \
+            --max-time 120 \
+            "$URL" \
+            -o "$TEMP"
 
-          if [ $? -ne 0 ]; then
-            echo "Download failed. Skipping update."
-            rm -f "$TEMP"
-            exit 0
-          fi
+          echo "Download completed."
 
-          # 文件不能为空
-          if [ ! -s "$TEMP" ]; then
-            echo "Downloaded file is empty. Skipping update."
-            rm -f "$TEMP"
-            exit 0
-          fi
-
-          # 必须包含 M3U 标识
-          if ! head -n 5 "$TEMP" | grep -q "#EXTM3U"; then
-            echo "Downloaded file does not appear to be a valid M3U file. Skipping update."
-            rm -f "$TEMP"
-            exit 0
-          fi
-
-          # 修改 tvg-name
+          # 该频道节目单尚无 → 后面的频道名称
           python3 <<'PY'
-          from pathlib import Path
           import re
 
-          file = Path("IPTV-Unicom-Multicast.m3u.tmp")
+          file = "IPTV-Unicom-Multicast.m3u.tmp"
 
-          text = file.read_text(encoding="utf-8")
+          with open(file, "r", encoding="utf-8-sig") as f:
+              text = f.read()
 
-          lines = text.splitlines(keepends=True)
-          result = []
+          text = re.sub(
+              r'tvg-name="该频道节目单尚无",([^,\r\n]+)',
+              r'tvg-name="\1",\1',
+              text
+          )
 
-          changed = 0
-
-          for line in lines:
-              # 只处理当前这一行：
-              # #EXTINF:... tvg-name="该频道节目单尚无",频道名称
-              #
-              # 不读取下一行，因此不会受到下面 URL 行的影响。
-              pattern = r'^(#EXTINF:[^\r\n]*?)tvg-name="该频道节目单尚无"(,[^\r\n]*)$'
-
-              match = re.match(pattern, line.rstrip("\r\n"))
-
-              if match:
-                  prefix = match.group(1)
-                  channel_part = match.group(2)
-
-                  # 取逗号后面的频道名称
-                  channel_name = channel_part[1:]
-
-                  # 保留原来的行尾
-                  newline = ""
-                  if line.endswith("\r\n"):
-                      newline = "\r\n"
-                  elif line.endswith("\n"):
-                      newline = "\n"
-                  elif line.endswith("\r"):
-                      newline = "\r"
-
-                  new_line = (
-                      prefix
-                      + 'tvg-name="'
-                      + channel_name
-                      + '"'
-                      + channel_part
-                      + newline
-                  )
-
-                  result.append(new_line)
-                  changed += 1
-              else:
-                  result.append(line)
-
-          file.write_text("".join(result), encoding="utf-8")
-
-          print(f"Updated tvg-name entries: {changed}")
+          with open(file, "w", encoding="utf-8") as f:
+              f.write(text)
           PY
 
-          # 确认修改后的文件仍然存在且非空
-          if [ ! -s "$TEMP" ]; then
-            echo "Modified file is empty. Skipping update."
-            rm -f "$TEMP"
-            exit 0
-          fi
+          # 直接生成/覆盖仓库文件
+          cp -f "$TEMP" "$FILE"
 
-          # 检查是否还存在需要处理的异常 tvg-name
-          remaining=$(grep -c 'tvg-name="该频道节目单尚无"' "$TEMP" || true)
+          rm -f "$TEMP"
 
-          if [ "$remaining" -gt 0 ]; then
-            echo "Some invalid tvg-name entries remain: $remaining"
-            echo "Skipping update to protect the existing file."
-            rm -f "$TEMP"
-            exit 0
-          fi
+          echo "IPTV-Unicom-Multicast.m3u generated successfully."
 
-          # 所有检查通过后正式覆盖
-          mv "$TEMP" "$FILE"
-
-          echo "IPTV-Unicom-Multicast.m3u updated successfully."
-
-      - name: Commit changes
+      - name: Commit and push
         shell: bash
         run: |
-          set +e
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add IPTV-Unicom-Multicast.m3u
 
-          # 没有变化就不提交
           if git diff --cached --quiet; then
             echo "No changes detected."
             exit 0
           fi
 
           git commit -m "Update IPTV-Unicom-Multicast.m3u"
-
-          if [ $? -ne 0 ]; then
-            echo "Commit failed. Ignoring error."
-            exit 0
-          fi
-
           git push
-
-          if [ $? -ne 0 ]; then
-            echo "Push failed. Ignoring error."
-            exit 0
-          fi
-
-          echo "Update completed successfully."
