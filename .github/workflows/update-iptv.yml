@@ -2,7 +2,6 @@ name: Update IPTV-Unicom
 
 on:
   schedule:
-      # 每天北京时间 07:00
     - cron: "0 23 * * *"
   workflow_dispatch:
 
@@ -26,175 +25,57 @@ jobs:
           FILE="IPTV-Unicom.m3u"
           TEMP="IPTV-Unicom.m3u.tmp"
 
-          echo "Downloading:"
-          echo "$URL"
+          echo "Downloading..."
 
-          rm -f "$TEMP"
-
-          if ! curl -fL \
+          curl -fL \
             --connect-timeout 20 \
             --max-time 120 \
             "$URL" \
-            -o "$TEMP"; then
+            -o "$TEMP"
 
-            echo "ERROR: Download failed."
+          echo "Download completed."
 
-            rm -f "$TEMP"
-            exit 1
-          fi
+          # 192.168.123.1:23234 → 192.168.7.1:8888
+          sed -i 's/192\.168\.123\.1:23234/192.168.7.1:8888/g' "$TEMP"
 
-          if [ ! -s "$TEMP" ]; then
-            echo "ERROR: Downloaded file is empty."
-            rm -f "$TEMP"
-            exit 1
-          fi
-
-          echo "Downloaded successfully."
-          echo "File size:"
-          wc -c "$TEMP"
-
-          echo "Checking M3U header..."
-
-          if ! head -n 5 "$TEMP" | grep -q "#EXTM3U"; then
-            echo "ERROR: Not a valid M3U file."
-            rm -f "$TEMP"
-            exit 1
-          fi
-
-          echo "M3U header OK."
-
-          echo "Replacing IPTV relay address..."
-
-          sed -i \
-            's/192\.168\.123\.1:23234/192.168.7.1:8888/g' \
-            "$TEMP"
-
-          echo "Updating tvg-name..."
-
+          # 该频道节目单尚无 → 后面的频道名称
           python3 <<'PY'
-          from pathlib import Path
           import re
 
-          file = Path("IPTV-Unicom.m3u.tmp")
+          file = "IPTV-Unicom.m3u"
 
-          text = file.read_text(encoding="utf-8-sig")
-          lines = text.splitlines(keepends=True)
+          with open("IPTV-Unicom.m3u.tmp", "r", encoding="utf-8-sig") as f:
+              text = f.read()
 
-          result = []
-          changed = 0
-
-          pattern = re.compile(
-              r'^(#EXTINF:[^\r\n]*?)tvg-name="该频道节目单尚无"(,[^\r\n]*)$'
+          text = re.sub(
+              r'tvg-name="该频道节目单尚无",([^,\r\n]+)',
+              r'tvg-name="\1",\1',
+              text
           )
 
-          for line in lines:
-              newline = ""
-
-              if line.endswith("\r\n"):
-                  content = line[:-2]
-                  newline = "\r\n"
-              elif line.endswith("\n"):
-                  content = line[:-1]
-                  newline = "\n"
-              elif line.endswith("\r"):
-                  content = line[:-1]
-                  newline = "\r"
-              else:
-                  content = line
-
-              match = pattern.match(content)
-
-              if match:
-                  prefix = match.group(1)
-                  channel_part = match.group(2)
-                  channel_name = channel_part[1:]
-
-                  content = (
-                      prefix
-                      + 'tvg-name="'
-                      + channel_name
-                      + '"'
-                      + channel_part
-                  )
-
-                  changed += 1
-
-              result.append(content + newline)
-
-          file.write_text("".join(result), encoding="utf-8")
-
-          print(f"Updated tvg-name entries: {changed}")
+          with open("IPTV-Unicom.m3u.tmp", "w", encoding="utf-8") as f:
+              f.write(text)
           PY
-
-          echo "Processing finished."
-
-          echo "Checking result..."
-
-          if [ ! -s "$TEMP" ]; then
-            echo "ERROR: Processed file is empty."
-            rm -f "$TEMP"
-            exit 1
-          fi
-
-          echo "New relay address count:"
-          grep -o "192\.168\.7\.1:8888" "$TEMP" | wc -l
-
-          echo "Remaining old relay address count:"
-          grep -o "192\.168\.123\.1:23234" "$TEMP" | wc -l
-
-          echo "Remaining old tvg-name count:"
-          grep -o 'tvg-name="该频道节目单尚无"' "$TEMP" | wc -l || true
 
           # 直接生成/覆盖仓库文件
           cp -f "$TEMP" "$FILE"
 
           rm -f "$TEMP"
 
-          echo "================================="
-          echo "Final file:"
-          ls -lh "$FILE"
-          echo "================================="
+          echo "IPTV-Unicom.m3u generated successfully."
 
-          echo "Checking final file..."
-
-          grep -q "#EXTM3U" "$FILE"
-
-          echo "Final IPTV-Unicom.m3u generated successfully."
-
-      - name: Commit changes
+      - name: Commit and push
         shell: bash
         run: |
-          set +e
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add IPTV-Unicom.m3u
-
-          echo "Git status:"
-          git status --short
 
           if git diff --cached --quiet; then
             echo "No changes detected."
             exit 0
           fi
 
-          echo "Changes detected. Creating commit..."
-
           git commit -m "Update IPTV-Unicom.m3u"
-
-          if [ $? -ne 0 ]; then
-            echo "Commit failed."
-            exit 0
-          fi
-
-          echo "Pushing changes..."
-
           git push
-
-          if [ $? -ne 0 ]; then
-            echo "Push failed."
-            exit 0
-          fi
-
-          echo "Update completed successfully."
