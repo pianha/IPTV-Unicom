@@ -3,9 +3,9 @@ name: TXT2M3U
 on:
   workflow_dispatch:
 
-  schedule:
+  #schedule:
     # 北京时间每周一 20:00
-    - cron: "0 12 * * 1"
+    #- cron: "0 12 * * 1"
 
 # GitHub Actions 最长运行 5 分钟
 permissions:
