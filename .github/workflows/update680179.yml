@@ -20,14 +20,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 下载并转换 TXT
         shell: bash
         run: |
           set -euo pipefail
 
-          SOURCE_URL="http://45.192.97.170:5211/487299"
+          SOURCE_URL="http://45.192.97.170:5211/680179"
           OUTPUT="IPTV.m3u"
           TMP="IPTV.m3u.tmp"
           SOURCE="source.txt"
